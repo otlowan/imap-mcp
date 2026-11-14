@@ -1,6 +1,6 @@
 [project]
 name = "imap-mcp"
-version = "0.1.0+hardened"
+version = "0.2.0+hardened"
 description = "Read-only MCP server for searching and reading mail across multiple IMAP accounts (hardened fork)"
 readme = "README.md"
 license = "MIT"
