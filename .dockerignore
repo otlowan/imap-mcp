@@ -1,0 +1,21 @@
+# Only pyproject.toml, uv.lock, README.md, LICENSE and src/ are needed.
+.git
+.github
+.venv
+.pytest_cache
+.ruff_cache
+**/__pycache__
+tests
+dist
+build
+*.egg-info
+
+# Never send anything credential-shaped to the build context.
+accounts.toml
+*.pem
+*.key
+.env
+.env.*
+op.env
+*.secret
+creds/

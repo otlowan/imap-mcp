@@ -47,6 +47,7 @@ d'envoi, de suppression ou de déplacement.
 | Timeout réseau | aucun | 30 s par défaut (`timeout_seconds`) |
 | Recherche avec accents | échoue (US-ASCII) | `CHARSET UTF-8` automatique |
 | Dépendances | `mcp[cli]` 2.0.0, pyjwt 2.13.0 (avis GHSA) | `mcp` 2.3.0 sans extra, pyjwt ≥ 2.14 ; 39 paquets figés au lieu de 46 |
+| Transport | stdio | stdio (défaut) ou **Streamable HTTP avec jeton obligatoire** + image Docker durcie (v0.2.0) |
 
 ### Nouvelles options
 
@@ -119,6 +120,49 @@ openssl x509 -in bridge-cert.pem -noout -fingerprint -sha256
 Si Bridge est réinitialisé, son certificat change : la connexion est alors refusée
 (`tls: certificate verification failed` ou `fingerprint mismatch`) jusqu'à la mise à
 jour de `ca_file` / `tls_fingerprint_sha256`. C'est voulu.
+
+### Mode Streamable HTTP et conteneur (v0.2.0)
+
+Le stdio reste le mode par défaut. Pour exposer le serveur à une passerelle MCP
+(MetaMCP…) sur un réseau interne, lancez-le en **Streamable HTTP** :
+
+```sh
+export IMAP_MCP_HTTP_TOKEN="$(openssl rand -hex 32)"   # OBLIGATOIRE, >= 32 caractères
+imap-mcp --transport streamable-http                  # ou IMAP_MCP_TRANSPORT=streamable-http
+```
+
+| Variable | Défaut | Rôle |
+|---|---|---|
+| `IMAP_MCP_HTTP_TOKEN` | — (**obligatoire**) | jeton exigé dans `Authorization: Bearer …` (comparaison en temps constant) ; sans lui, le serveur **refuse de démarrer** |
+| `IMAP_MCP_HTTP_HOST` | `127.0.0.1` (`0.0.0.0` dans l'image) | adresse d'écoute |
+| `IMAP_MCP_HTTP_PORT` | `8000` | port |
+| `IMAP_MCP_ALLOWED_HOSTS` | `127.0.0.1:<port>,localhost:<port>` | valeurs d'en-tête `Host` acceptées (anti DNS-rebinding) ; ex. `imap-mcp:8000` |
+
+Point d'accès : `POST /mcp` (sans session, réponses JSON, corps ≤ 64 Kio). Toute
+requête sans le jeton exact reçoit `401`, un `Host` inconnu reçoit `421`.
+
+L'image (`Dockerfile`) : `python:3.13-slim` et `uv` figés par empreinte,
+`uv sync --locked --no-dev`, utilisateur non-root (uid 10001), compatible
+`read_only: true` et `cap_drop: [ALL]`. Montez `accounts.toml` (et le certificat de
+Bridge) en lecture seule dans `/config`, lisibles par l'uid 10001 ; passez le jeton
+et les mots de passe par un `env_file` (jamais dans l'image).
+
+```yaml
+services:
+  imap-mcp:
+    build: .                      # depuis un clone au commit taggé
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: ["/tmp"]
+    env_file: [.env]              # IMAP_MCP_HTTP_TOKEN, IMAP_MCP_ALLOWED_HOSTS, *_PASSWORD
+    volumes: ["./config:/config:ro"]
+    networks: [mcp-internal]      # aucun port publié
+networks:
+  mcp-internal:
+    external: true
+```
 
 ### Contenu non fiable
 
@@ -283,7 +327,7 @@ and the other accounts still answer.
 uv run pytest
 ```
 
-116 tests, no real account: the IMAP layer is faked, and TLS/STARTTLS are
+137 tests, no real account: the IMAP layer is faked, and TLS/STARTTLS are
 exercised against a local fake IMAP server (`tests/fake_imap.py`) with
 throwaway certificates. The suite locks in the read-only contract
 (`mark_seen=False`/`BODY.PEEK` on every fetch, `EXAMINE`, the command
@@ -291,6 +335,9 @@ allow-list), certificate verification and refusals (untrusted CA, wrong name,
 wrong fingerprint, STARTTLS failure without cleartext fallback), input
 validation, truncation, the `List-Unsubscribe` flag, and a static check that
 **fails if any write IMAP command or TLS weakening appears in the source**.
+The HTTP transport is tested against a real local uvicorn server (401 without
+the exact token, 421 on a forged `Host`, 413 on oversized bodies, refusal to
+start without a token).
 
 ## License
 
