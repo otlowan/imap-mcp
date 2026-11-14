@@ -19,7 +19,7 @@ from . import accounts as acct
 from . import imap
 from .tls import CertificatePinError, ForbiddenCommandError, StartTLSError
 
-mcp = MCPServer("imap-mcp", version="0.1.0+hardened")
+mcp = MCPServer("imap-mcp", version="0.2.0+hardened")
 
 
 def _parse_since(since: str | None) -> dt.date | None:
@@ -160,5 +160,28 @@ def get_email(account: str, id: str) -> dict:
     return msg
 
 
-def main() -> None:
-    mcp.run()
+def main(argv: list[str] | None = None) -> None:
+    import argparse
+    import os
+    import sys
+
+    parser = argparse.ArgumentParser(prog="imap-mcp", description="Read-only IMAP MCP server")
+    parser.add_argument(
+        "--transport",
+        choices=("stdio", "streamable-http"),
+        default=os.environ.get("IMAP_MCP_TRANSPORT", "stdio"),
+        help="stdio (default) or streamable-http (requires IMAP_MCP_HTTP_TOKEN)",
+    )
+    args = parser.parse_args(argv)
+    if args.transport == "stdio":
+        mcp.run()
+        return
+
+    from . import http_app
+
+    try:
+        config = http_app.load_http_config()
+        acct.all_accounts()  # fail fast on a broken accounts.toml
+    except (http_app.HTTPConfigError, acct.ConfigError, FileNotFoundError) as e:
+        sys.exit(f"imap-mcp: {e}")
+    http_app.serve(mcp, config)
