@@ -5,6 +5,16 @@
 # inject it with a secrets manager like `op run`).
 #
 # enabled = false accounts are listed but never logged into.
+#
+# Hardened fork -- optional global settings (must come before any [[account]]):
+# max_body_chars = 20000      # get_email body is truncated beyond this ("[tronqué]")
+# timeout_seconds = 30        # IMAP network timeout
+#
+# Optional per-account TLS settings (certificates are ALWAYS verified):
+# security = "ssl"            # "ssl" (implicit TLS, port 993) or "starttls" (port 143)
+# ca_file = "bridge-cert.pem" # trust ONLY this cert/CA (relative to this file)
+# tls_server_name = "..."     # name/IP expected in the cert if it differs from host
+# tls_fingerprint_sha256 = "" # pin the exact certificate (in addition to ca_file)
 
 [[account]]
 key = "personal"                        # short id used in tool calls
@@ -25,4 +35,27 @@ email = "you@gmail.com"
 host = "imap.gmail.com"
 port = 993
 password_env = "GMAIL_APP_PASSWORD"
+enabled = false
+
+# Mailo
+[[account]]
+key = "mailo"
+label = "you@mailo.com (Mailo)"
+email = "you@mailo.com"
+host = "mail.mailo.com"
+password_env = "MAILO_IMAP_PASSWORD"
+enabled = false
+
+# Proton Mail through Proton Bridge (self-signed cert issued for 127.0.0.1).
+# Credentials are the ones shown by Bridge's `info` command, not your Proton password.
+[[account]]
+key = "proton"
+label = "you@proton.me (Proton via Bridge)"
+email = "you@proton.me"
+host = "proton-bridge"
+security = "starttls"
+port = 143
+ca_file = "bridge-cert.pem"
+tls_server_name = "127.0.0.1"
+password_env = "PROTON_BRIDGE_PASSWORD"
 enabled = false
