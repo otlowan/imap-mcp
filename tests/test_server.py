@@ -40,7 +40,7 @@ def test_list_accounts_statuses(config, monkeypatch):
     status = {e["account"]: e["status"] for e in server.list_accounts()}
     assert status == {
         "alpha": "ok",
-        "gmailish": "unreachable: ConnectionRefusedError",
+        "gmailish": "unreachable: connection failed",
         "off": "disabled",
     }
 
@@ -93,7 +93,7 @@ def test_list_emails_account_failure_is_isolated(config, monkeypatch):
     monkeypatch.setattr(imap, "fetch_rows", fetch_rows)
     rows = server.list_emails()
     errors = [r for r in rows if "error" in r]
-    assert errors == [{"account": "alpha", "error": "TimeoutError: slow server"}]
+    assert errors == [{"account": "alpha", "error": "timeout"}]
     assert [r["account"] for r in rows if "error" not in r] == ["gmailish"]
 
 

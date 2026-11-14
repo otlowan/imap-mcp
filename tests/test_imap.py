@@ -6,27 +6,40 @@ import pytest
 from imap_mcp import accounts, imap
 
 
+class FakeFolder:
+    def __init__(self, box):
+        self.box = box
+
+    def set(self, folder, readonly=False):
+        self.box.folder_set = (folder, readonly)
+
+
 class FakeMailBox:
-    """Stands in for imap_tools.MailBox; records login/fetch args, no network."""
+    """Stands in for HardenedMailBox; records login/folder/fetch args, no network."""
 
     instances = []
     messages = []
 
-    def __init__(self, host, port=993):
-        self.host = host
-        self.port = port
+    def __init__(self, account, timeout):
+        self.host = account.host
+        self.port = account.port
+        self.timeout = timeout
         self.login_args = None
+        self.folder_set = None
         self.fetch_kwargs = None
+        self.fetch_calls = []
         self.logged_out = False
+        self.folder = FakeFolder(self)
         FakeMailBox.instances.append(self)
 
     def login(self, email, password, initial_folder="INBOX"):
         self.login_args = (email, password, initial_folder)
         return self
 
-    def fetch(self, criteria, **kwargs):
+    def fetch(self, criteria="ALL", **kwargs):
         self.fetch_criteria = criteria
         self.fetch_kwargs = kwargs
+        self.fetch_calls.append(kwargs)
         return iter(FakeMailBox.messages)
 
     def logout(self):
@@ -52,6 +65,7 @@ def fake_msg(**overrides):
         text="line one\nline two",
         html="",
         headers={"message-id": ["<abc@example.com>"]},
+        size_rfc822=1000,
     )
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -66,7 +80,8 @@ def test_open_box_requires_password(config):
 def test_open_box_logs_in_and_out(config, monkeypatch):
     monkeypatch.setenv("ALPHA_PW", "s3cret")
     with imap.open_box(accounts.get_account("alpha")) as box:
-        assert box.login_args == ("alpha@example.com", "s3cret", "INBOX")
+        assert box.login_args == ("alpha@example.com", "s3cret", None)
+        assert box.folder_set == ("INBOX", True)  # EXAMINE (read-only), not SELECT
         assert (box.host, box.port) == ("imap.example.com", 1993)
         assert not box.logged_out
     assert box.logged_out
@@ -91,7 +106,7 @@ def test_snippet_collapses_newlines_and_truncates():
 
 def test_snippet_falls_back_to_html():
     msg = fake_msg(text="", html="<p>hi</p>")
-    assert imap._snippet(msg) == "<p>hi</p>"
+    assert imap._snippet(msg) == "hi"  # HTML converted to plain text
 
 
 def test_row_shape():
@@ -104,7 +119,9 @@ def test_row_shape():
         "subject": "Hello",
         "date": "2026-07-30T12:00:00+00:00",
         "unread": True,
+        "list_unsubscribe": False,
         "snippet": "line one line two",
+        "untrusted_content": True,
     }
 
 
@@ -143,10 +160,10 @@ def test_fetch_rows_never_marks_seen(config, monkeypatch):
 
     assert [r["id"] for r in rows] == ["42"]
     assert rows[0]["account"] == "alpha"
-    kwargs = FakeMailBox.instances[-1].fetch_kwargs
-    assert kwargs["mark_seen"] is False
-    assert kwargs["reverse"] is True
-    assert kwargs["limit"] == 7
+    calls = FakeMailBox.instances[-1].fetch_calls
+    assert calls and all(c["mark_seen"] is False for c in calls)  # PEEK on every fetch
+    assert calls[0]["reverse"] is True
+    assert calls[0]["limit"] == 7
 
 
 def test_fetch_one_full_message(config, monkeypatch):
@@ -164,9 +181,14 @@ def test_fetch_one_full_message(config, monkeypatch):
         "date": "2026-07-30T12:00:00+00:00",
         "unread": False,
         "message_id": "<abc@example.com>",
+        "list_unsubscribe": False,
         "body": "line one\nline two",
+        "body_truncated": False,
+        "body_chars": 17,
+        "untrusted_content": True,
     }
     assert FakeMailBox.instances[-1].fetch_kwargs["mark_seen"] is False
+    assert FakeMailBox.instances[-1].fetch_kwargs["uid_list"] == ["42"]
 
 
 def test_fetch_one_not_found(config, monkeypatch):
